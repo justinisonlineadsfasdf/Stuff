@@ -1,0 +1,194 @@
+import yt_dlp
+
+import yt_dlp
+import ffmpeg
+import cv2
+import numpy as np
+import os
+
+import random
+import string
+import time
+
+def download_video(url, download_path='downloads'):
+    """
+    Download a video from the given URL using yt-dlp.
+    Args:
+    - url: Video URL (e.g., from Instagram, YouTube, etc.)
+    - download_path: Path where the video should be saved.
+    Returns:
+    - download_path: Path where the downloaded video is saved.
+    """
+    if not os.path.exists(download_path):
+        os.makedirs(download_path)
+
+    ydl_opts = {
+        'outtmpl': os.path.join(download_path, '%(title)s.%(ext)s'),
+        'format': 'bestvideo+bestaudio/best',
+        'quiet': True,  # Suppress the output
+        'merge_output_format': 'mp4',  # Ensure merged file is in mp4 format
+        'postprocessors': [{  # Merge audio and video if separate streams
+            'key': 'FFmpegVideoConvertor',  # Use ffmpeg to merge
+            'preferedformat': 'mp4',  # Output format
+        }],
+    }
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        video_file = ydl.prepare_filename(info)  # Get the file path of the downloaded video
+    return video_file
+
+
+def detect_black_bars(input_video, threshold=50):
+    """
+    Detects black bars in a video by analyzing the pixel intensity.
+    Args:
+    - input_video: Path to the input video file.
+    - threshold: Pixel value below which the region is considered black.
+    
+    Returns:
+    - top, bottom, left, right: Coordinates to crop the black bars.
+    """
+    cap = cv2.VideoCapture(input_video)
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    
+    # Variables to track the crop boundaries
+    top, bottom, left, right = 0, 0, 0, 0
+
+    for i in range(frame_count):
+        ret, frame = cap.read()
+        if not ret:
+            break
+        
+        # Convert to grayscale to make it easier to detect black bars
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        
+        # Create a mask where black pixels are detected
+        mask = gray < threshold
+        
+        # Get the bounding box of the non-black regions
+        coords = np.column_stack(np.where(mask == False))  # (y, x) coordinates of non-black pixels
+
+        if coords.size > 0:
+            y_min, x_min = coords.min(axis=0)
+            y_max, x_max = coords.max(axis=0)
+            if top==0 and bottom==0 and left==0 and right==0:
+                top=y_min
+                bottom=y_max
+                left=x_min
+                right=x_max
+            # Update the crop area based on the current frame
+            else:
+                top = min(top, y_min)
+                bottom = max(bottom, y_max)
+                left = min(left, x_min)
+                right = max(right, x_max)
+    
+    cap.release()
+    
+    # Return the coordinates for cropping
+    return top, bottom, left, right
+
+
+def crop_video(input_video, output_video, crop_area):
+    """
+    Crops the video based on the detected black bars.
+    Args:
+    - input_video: Path to the input video file.
+    - output_video: Path to the output cropped video file.
+    - crop_area: Tuple (top, bottom, left, right) representing the crop coordinates.
+    """
+    top, bottom, left, right = crop_area
+    ffmpeg.input(input_video).crop(x=left, y=top, width=(right-left), height=(bottom-top)).output(output_video).run(quiet=True)
+
+def extract_audio(input_video, output_audio):
+    """
+    Extracts the audio from the input video.
+    Args:
+    - input_video: Path to the input video file.
+    - output_audio: Path to the output audio file.
+    """
+    ffmpeg.input(input_video).output(output_audio).run(quiet=True)
+
+def merge_audio_video(video_file, audio_file, output_file):
+    """
+    Merges the audio and video into one file using ffmpeg.
+    Args:
+    - video_file: Path to the video file.
+    - audio_file: Path to the audio file.
+    - output_file: Path to the final output file.
+    """
+    # Input for video and audio
+    video_input = ffmpeg.input(video_file)
+    audio_input = ffmpeg.input(audio_file)
+
+    # Output to the final file with proper codecs
+    ffmpeg.output(video_input, audio_input, output_file, vcodec='copy', acodec='aac', strict='experimental').run(quiet=True)
+
+
+
+def delete_file(file_path):
+    """
+    Deletes the specified file.
+    Args:
+    - file_path: Path to the file to be deleted.
+    """
+    if os.path.exists(file_path):
+        os.remove(file_path)
+        print(f"Deleted the file: {file_path}")
+    else:
+        print(f"File not found: {file_path}")
+
+
+def everything(link):
+    # Step 1: Get the Instagram (or other) video URL
+    #url = input("Enter the URL of the video (e.g., from Instagram, YouTube): ")
+
+    # Step 2: Download the video
+    #print("Downloading video...")
+    #downloaded_video = download_video(link)
+    #print(f"Downloaded video: {downloaded_video}")
+    downloaded_video = "/Users/luke/SocialMedia/Snapinsta.app_video_0541B70E7448532E2AF6F2248662A290_video_dashinit.mp4"
+    # Step 3: Detect black bars in the video
+    print("Detecting black bars...")
+    crop_area = detect_black_bars(downloaded_video)
+    print(f"Black bars detected, crop area: {crop_area}")
+    
+    # Step 4: Crop the video and save it to a new file
+    cropped_video = downloaded_video.replace(".mp4", "_cropped.mp4")
+    print(f"Cropping the video and saving it to {cropped_video}...")
+    crop_video(downloaded_video, cropped_video, crop_area)
+    print(f"Video cropped and saved to {cropped_video}")
+
+     # Step 5: Extract audio from the original video
+    audio_file = downloaded_video.replace(".mp4", ".audio.m4a")
+    print(f"Extracting audio from the original video to {audio_file}...")
+    extract_audio(downloaded_video, audio_file)
+
+    # Step 6: Merge the cropped video with the extracted audio
+    final_output = ("".join(random.choices(string.ascii_letters + string.digits, k=10))) + ".mp4"
+    print(f"Merging audio and video into {final_output}...")
+    merge_audio_video(cropped_video, audio_file, final_output)
+    print(f"Audio and video merged into {final_output}")
+
+    # Step 7: Clean up original and temporary files
+    #delete_file(downloaded_video)
+    delete_file(cropped_video)
+    delete_file(audio_file)
+
+def main():
+    file = open('Untitled.txt', 'r')  # Open file in read mode
+
+    for line in file:
+        everything(line.strip())
+        time.sleep(random.uniform(10,25))
+        print("done")
+
+    file.close()
+
+
+
+if __name__ == "__main__":
+    main()
